@@ -2,6 +2,7 @@
 using TcpClientLibrary;
 using Crestron.SimplSharp;
 
+
 namespace TSI_Enhanced_TCP_Client
 {
     public class TcpClientObject
@@ -12,6 +13,7 @@ namespace TSI_Enhanced_TCP_Client
         private string _ipaddress;
         private ushort _port;
         //private
+
 
         //events
         public event EventHandler<ResponseEventArgs> ResponseReceived;
@@ -56,6 +58,7 @@ namespace TSI_Enhanced_TCP_Client
                 ConnectionStatusUpdateToSimpl(false);
             }
         }
+
 
         public void QueueCommand(string cmd)
         {
