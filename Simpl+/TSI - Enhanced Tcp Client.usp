@@ -1,0 +1,84 @@
+/*******************************************************************************************
+  SIMPL+ Module Information
+  (Fill in comments below)
+*******************************************************************************************/
+/*
+Dealer Name:
+System Name:
+System Number:
+Programmer:		Jeff Pride
+Comments:
+*/
+
+/*******************************************************************************************
+  Compiler Directives
+  (Uncomment and declare compiler directives as needed)
+*******************************************************************************************/
+#SYMBOL_NAME "TSI - Enhanced Tcp Client - 4series"
+#CATEGORY "46" "#TSI Modules"
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+
+/*******************************************************************************************
+  Include Libraries
+*******************************************************************************************/
+//#INCLUDEPATH "C:\Users\jpride\source\repos\TSI - Enhanced TCP Client\TSI - Enhanced TCP Client\bin\Debug"
+#User_SIMPLSHARP_LIBRARY "TSI - Enhanced TCP Client"
+
+/*******************************************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+*******************************************************************************************/
+ANALOG_INPUT 	Port;
+STRING_INPUT 	IpAddress[15],
+				_skip_,
+				Tx$[65534];
+
+STRING_OUTPUT 	Rx$;
+
+
+/*******************************************************************************************
+  Global Variables
+*******************************************************************************************/
+      
+TcpClientObject client;
+
+/*******************************************************************************************
+  Event Handlers
+*******************************************************************************************/
+Change Port
+{
+	//client.DisposeClient();
+	client.Initialize(IpAddress, Port);
+}
+
+Change IpAddress
+{
+	//client.DisposeClient();
+    client.Initialize(IpAddress, Port);
+}
+
+threadsafe Change Tx$
+{
+	client.QueueCommand(Tx$);
+}         
+            
+eventhandler onResponseReceived(TcpClientObject sender, ResponseEventArgs e)
+{
+ 	Rx$ = e.Response;
+} 
+
+/*******************************************************************************************
+  Main()
+*******************************************************************************************/
+
+Function Main()
+{
+	RegisterEvent(client,ResponseReceived, onResponseReceived);
+	
+    WaitForInitializationComplete();
+	client.Initialize(IpAddress, Port);
+
+}
+
+

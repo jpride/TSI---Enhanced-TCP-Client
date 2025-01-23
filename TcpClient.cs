@@ -109,7 +109,7 @@ namespace TSI_Enhanced_TCP_Client
 
         private void Client_ConnectionStatusChanged(object sender, bool isConnected)
         {
-            //CrestronConsole.PrintLine($"Connection status changed: {isConnected}");
+            CrestronConsole.PrintLine($"Connection status changed: {isConnected}");
 
             ConnectionStatusUpdateToSimpl(isConnected);
         }
