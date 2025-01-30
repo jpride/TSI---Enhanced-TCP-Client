@@ -43,9 +43,6 @@ namespace TcpClientLibrary
          }
 
 
-
-
-
         public void QueueCommand(string command)
         {
             _commandQueue.Enqueue(command); 
