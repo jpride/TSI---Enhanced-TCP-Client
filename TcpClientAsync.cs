@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Crestron.SimplSharp;
 
 namespace TcpClientLibrary
 {
@@ -32,20 +31,19 @@ namespace TcpClientLibrary
             _commandQueue = new ConcurrentQueue<string>();
             _cancellationTokenSource = new CancellationTokenSource();
             _isConnected = true;
-            
-            
-
+                     
             StartSendingCommands();
             StartReceivingResponses();
 
             OnConnectionStatusChanged(true);
-
          }
-
 
         public void QueueCommand(string command)
         {
-            _commandQueue.Enqueue(command); 
+            if (!String.IsNullOrEmpty(command))
+            {
+                _commandQueue.Enqueue(command);
+            }
         }
 
         private async void StartSendingCommands()
@@ -98,7 +96,6 @@ namespace TcpClientLibrary
 
         protected virtual void OnConnectionStatusChanged(bool isConnected)
         {
-            
             if (isConnected != _isConnected)
             {
                 _isConnected = isConnected;
