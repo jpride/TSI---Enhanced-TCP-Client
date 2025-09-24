@@ -61,16 +61,24 @@ namespace TSI_Enhanced_TCP_Client
 
         public void QueueCommand(string cmd) //error getting thrown when strings are queued from simpl+ when client is null
         {
-            if (!String.IsNullOrEmpty(cmd))
+            try
             {
                 if (_client == null)
                 {
-                    CrestronConsole.PrintLine("Client is not initialized. Please initialize the client before sending commands.");
+                    CrestronConsole.PrintLine("TcpClientObject.QueueCommand: Client is not initialized. Please initialize the client before sending commands.");
                     return;
                 }
-                _client.QueueCommand(cmd);
 
-            }           
+                if (!String.IsNullOrEmpty(cmd))
+                {
+                    _client.QueueCommand(cmd);
+                }
+            }
+            catch (Exception)
+            {
+                CrestronConsole.PrintLine("TcpClientObject.QueueCommand: Client is not initialized. Please initialize the client before sending commands.");
+            }
+          
         }
 
         public void DisposeClient()
