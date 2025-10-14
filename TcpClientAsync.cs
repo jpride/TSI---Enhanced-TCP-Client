@@ -57,9 +57,17 @@ namespace TcpClientLibrary
                         command += Environment.NewLine;
                     }
 
-                    byte[] data = Encoding.UTF8.GetBytes(command);
-                    await _stream.WriteAsync(data, 0, data.Length, _cancellationTokenSource.Token);
-                    await Task.Delay(DequeueingDelay); // delay between messages
+                    try
+                    {
+                        byte[] data = Encoding.UTF8.GetBytes(command);
+                        await _stream.WriteAsync(data, 0, data.Length, _cancellationTokenSource.Token);
+                        await Task.Delay(DequeueingDelay); // delay between messages
+                    }
+                    catch (Exception e)
+                    {
+                        throw new Exception($"Error in StartSendingCommands: {e.Message}");
+                    }
+
                 }
                 else
                 {
@@ -73,20 +81,29 @@ namespace TcpClientLibrary
         private async void StartReceivingResponses()
         {
             byte[] buffer = new byte[65535];
-            while (!_cancellationTokenSource.Token.IsCancellationRequested)
+
+            try
             {
-                if (_stream.DataAvailable)
+                while (!_cancellationTokenSource.Token.IsCancellationRequested)
                 {
-                    int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length, _cancellationTokenSource.Token);
-                    if (bytesRead > 0)
+                    if (_stream.DataAvailable)
                     {
-                        string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                        OnResponseReceived(response);
+                        int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length, _cancellationTokenSource.Token);
+                        if (bytesRead > 0)
+                        {
+                            string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                            OnResponseReceived(response);
+                        }
                     }
+
+                    await Task.Delay(ResponseCheckInterval); // Check for new responses every 50 milliseconds
                 }
-                
-                await Task.Delay(ResponseCheckInterval); // Check for new responses every 50 milliseconds
             }
+            catch (Exception e)
+            {
+                throw new Exception($"Error in StartReceivingResponses: {e.Message}");
+            }
+
         }
 
         protected virtual void OnResponseReceived(string response)
@@ -107,7 +124,7 @@ namespace TcpClientLibrary
         {
             _cancellationTokenSource.Cancel();
             _stream.Close();
-            _client.Close();
+            _client.Close(); 
 
             OnConnectionStatusChanged(false);
         }

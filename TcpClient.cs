@@ -1,6 +1,8 @@
 ﻿using System;
 using TcpClientLibrary;
 using Crestron.SimplSharp;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 
 namespace TSI_Enhanced_TCP_Client
@@ -12,6 +14,8 @@ namespace TSI_Enhanced_TCP_Client
 
         private string _ipaddress;
         private ushort _port;
+
+
         //private
 
 
@@ -33,10 +37,17 @@ namespace TSI_Enhanced_TCP_Client
             set { _port = value; }
         }
 
+        
         public void Initialize(string ipaddress, ushort port)
         {
+            string methodName = MethodInfo.GetCurrentMethod().Name;
+            string className = this.GetType().Name;
+
+
             IPAddress = ipaddress;
             Port = port;
+
+            
 
             try
             {
@@ -50,22 +61,26 @@ namespace TSI_Enhanced_TCP_Client
                 _client.ConnectionStatusChanged += Client_ConnectionStatusChanged;
 
                 ConnectionStatusUpdateToSimpl(true);
-                CrestronConsole.PrintLine($"Class library - Client Initialized Successfuly");
+                CrestronConsole.PrintLine($"{className}.{methodName}: Client Initialized Successfuly");
             }
             catch (Exception ex)
             {
-                CrestronConsole.PrintLine($"Error in Initialize - {ex.Message}");
+                CrestronConsole.PrintLine($"Error in {className}.{methodName} - {ex.Message}");
                 ConnectionStatusUpdateToSimpl(false);
             }
         }
 
         public void QueueCommand(string cmd) //error getting thrown when strings are queued from simpl+ when client is null
         {
+            string methodName = MethodInfo.GetCurrentMethod().Name;
+            string className = this.GetType().Name;
+
+
             try
             {
                 if (_client == null)
                 {
-                    CrestronConsole.PrintLine("TcpClientObject.QueueCommand: Client is not initialized. Please initialize the client before sending commands.");
+                    CrestronConsole.PrintLine($"{className}.{methodName}: Client is not initialized. Please initialize the client before sending commands.");
                     return;
                 }
 
@@ -76,13 +91,16 @@ namespace TSI_Enhanced_TCP_Client
             }
             catch (Exception)
             {
-                CrestronConsole.PrintLine("TcpClientObject.QueueCommand: Client is not initialized. Please initialize the client before sending commands.");
+                CrestronConsole.PrintLine($"{className}.{methodName}: Client is not initialized. Please initialize the client before sending commands.");
             }
           
         }
 
         public void DisposeClient()
         {
+            string methodName = MethodInfo.GetCurrentMethod().Name;
+            string className = this.GetType().Name;
+
             if (_client != null)
             {
                 try
@@ -91,12 +109,12 @@ namespace TSI_Enhanced_TCP_Client
                     _client.ConnectionStatusChanged -= Client_ConnectionStatusChanged;
                     _client.Dispose();
                     _client = null;
-                    CrestronConsole.PrintLine("Client disposed");
+                    CrestronConsole.PrintLine($"{className}.{methodName}: Client disposed");
                     ConnectionStatusUpdateToSimpl(false);
                 }
                 catch (Exception ex)
                 {
-                    CrestronConsole.PrintLine($"Error disposing client - {ex.Message}");
+                    CrestronConsole.PrintLine($"{className}.{methodName}: Error disposing client - {ex.Message}");
                 }
             }
         }
