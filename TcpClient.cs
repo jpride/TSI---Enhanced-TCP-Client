@@ -59,6 +59,7 @@ namespace TSI_Enhanced_TCP_Client
                 _client = new TcpClientAsync(IPAddress, Port);
                 _client.ResponseReceived += Client_ResponseReceived;
                 _client.ConnectionStatusChanged += Client_ConnectionStatusChanged;
+                _client.Initialize();
 
                 ConnectionStatusUpdateToSimpl(true);
                 CrestronConsole.PrintLine($"{className}.{methodName}: Client Initialized Successfuly");
@@ -70,7 +71,7 @@ namespace TSI_Enhanced_TCP_Client
             }
         }
 
-        public void QueueCommand(string cmd) //error getting thrown when strings are queued from simpl+ when client is null
+        public void QueueCommand(string cmd)
         {
             string methodName = MethodInfo.GetCurrentMethod().Name;
             string className = this.GetType().Name;
