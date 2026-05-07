@@ -1,30 +1,21 @@
-﻿using System;
+using System;
 using TcpClientLibrary;
 using Crestron.SimplSharp;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 
 
 namespace TSI_Enhanced_TCP_Client
 {
     public class TcpClientObject
     {
-        //private 
         private TcpClientAsync _client;
 
         private string _ipaddress;
         private ushort _port;
 
-
-        //private
-
-
-        //events
         public event EventHandler<ResponseEventArgs> ResponseReceived;
         public event EventHandler<ConnectionStatusEventArgs> ConnectionStatusChanged;
-        //events
 
-        
         public string IPAddress
         {
             get { return _ipaddress; }
@@ -37,17 +28,13 @@ namespace TSI_Enhanced_TCP_Client
             set { _port = value; }
         }
 
-        
         public void Initialize(string ipaddress, ushort port)
         {
             string methodName = MethodInfo.GetCurrentMethod().Name;
             string className = this.GetType().Name;
 
-
             IPAddress = ipaddress;
             Port = port;
-
-            
 
             try
             {
@@ -61,8 +48,12 @@ namespace TSI_Enhanced_TCP_Client
                 _client.ConnectionStatusChanged += Client_ConnectionStatusChanged;
                 _client.Initialize();
 
-                ConnectionStatusUpdateToSimpl(true);
-                CrestronConsole.PrintLine($"{className}.{methodName}: Client Initialized Successfuly");
+                // FIX #5: Removed premature ConnectionStatusUpdateToSimpl(true) call.
+                // Initialize() only starts the background connection task — the socket is
+                // not yet open at this point. ConnectionStatusChanged events from TcpClientAsync
+                // are the sole source of truth for connected state.
+
+                CrestronConsole.PrintLine($"{className}.{methodName}: Client initialized successfully.");
             }
             catch (Exception ex)
             {
@@ -75,7 +66,6 @@ namespace TSI_Enhanced_TCP_Client
         {
             string methodName = MethodInfo.GetCurrentMethod().Name;
             string className = this.GetType().Name;
-
 
             try
             {
@@ -94,7 +84,6 @@ namespace TSI_Enhanced_TCP_Client
             {
                 CrestronConsole.PrintLine($"{className}.{methodName}: Client is not initialized. Please initialize the client before sending commands.");
             }
-          
         }
 
         public void DisposeClient()
@@ -110,7 +99,7 @@ namespace TSI_Enhanced_TCP_Client
                     _client.ConnectionStatusChanged -= Client_ConnectionStatusChanged;
                     _client.Dispose();
                     _client = null;
-                    CrestronConsole.PrintLine($"{className}.{methodName}: Client disposed");
+                    CrestronConsole.PrintLine($"{className}.{methodName}: Client disposed.");
                     ConnectionStatusUpdateToSimpl(false);
                 }
                 catch (Exception ex)
@@ -124,7 +113,7 @@ namespace TSI_Enhanced_TCP_Client
         {
             ConnectionStatusEventArgs args = new ConnectionStatusEventArgs
             {
-                IsConnected = (ushort)(isConnected ? 1 : 0) //must convert bools to ushorts for simpl+
+                IsConnected = (ushort)(isConnected ? 1 : 0)
             };
 
             ConnectionStatusChanged?.Invoke(this, args);
@@ -136,16 +125,13 @@ namespace TSI_Enhanced_TCP_Client
             {
                 Response = response,
             };
-            ResponseReceived?.Invoke(this, args);   
+            ResponseReceived?.Invoke(this, args);
         }
 
         private void Client_ConnectionStatusChanged(object sender, bool isConnected)
         {
             CrestronConsole.PrintLine($"Connection status changed: {isConnected}");
-
             ConnectionStatusUpdateToSimpl(isConnected);
         }
-
     }
 }
-

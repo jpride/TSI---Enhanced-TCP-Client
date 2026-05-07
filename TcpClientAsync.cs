@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net.Sockets;
@@ -19,21 +19,21 @@ namespace TcpClientLibrary
         private readonly string _ipAddress;
         private readonly int _port;
 
-        // --- NEW: Configurable delays for robustness ---
-        private readonly int _dequeueingDelay = 400;
+        // FIX #2: Use an int flag with Interlocked to make IsConnected thread-safe
+        // and prevent HandleDisconnectionAsync from being entered by multiple threads simultaneously.
+        private int _isConnected = 0; // 0 = false, 1 = true
+
+        private readonly int _dequeueingDelay = 200;
         private readonly int _commandCheckDelay = 50;
-        private readonly int _responseCheckInterval = 100;
-        private readonly int _reconnectInterval = 5000; // Attempt to reconnect every 5 seconds
-        private readonly int _connectionMonitorInterval = 3000; // Check connection status every 3 seconds
+        private readonly int _reconnectInterval = 5000;
+        private readonly int _connectionMonitorInterval = 3000;
 
         public event EventHandler<string> ResponseReceived;
         public event EventHandler<bool> ConnectionStatusChanged;
 
-        public bool IsConnected { get; private set; }
+        // FIX #2: IsConnected is now derived from the thread-safe _isConnected flag
+        public bool IsConnected => System.Threading.Interlocked.CompareExchange(ref _isConnected, 0, 0) == 1;
 
-        /// <summary>
-        /// Initializes the TCP client but does not connect. Call ConnectAsync to start the connection.
-        /// </summary>
         public TcpClientAsync(string ipAddress, int port)
         {
             _ipAddress = ipAddress;
@@ -41,19 +41,12 @@ namespace TcpClientLibrary
             _commandQueue = new ConcurrentQueue<string>();
         }
 
-        /// <summary>
-        /// Initiates connection and starts all background tasks for sending, receiving, and monitoring.
-        /// </summary>
         public void Initialize()
         {
             _cancellationTokenSource = new CancellationTokenSource();
-            // Start the connection and reconnection loop in the background.
             Task.Run(ManageConnectionAsync, _cancellationTokenSource.Token);
         }
 
-        /// <summary>
-        /// Central method to manage the connection lifecycle, including initial connection and reconnection.
-        /// </summary>
         private async Task ManageConnectionAsync()
         {
             while (!_cancellationTokenSource.Token.IsCancellationRequested)
@@ -71,18 +64,22 @@ namespace TcpClientLibrary
                     await _client.ConnectAsync(_ipAddress, _port);
                     _stream = _client.GetStream();
 
-                    IsConnected = true;
+                    // FIX #2: Use Interlocked.Exchange to atomically set connected state
+                    System.Threading.Interlocked.Exchange(ref _isConnected, 1);
                     OnConnectionStatusChanged(true);
                     CrestronConsole.PrintLine("Connection successful.");
 
-                    // Start the tasks for this connection instance
                     var sendTask = StartSendingCommandsAsync();
                     var receiveTask = StartReceivingResponsesAsync();
                     var monitorTask = MonitorConnectionAsync();
 
-                    // Wait for any of the tasks to complete (which indicates a disconnection)
                     await Task.WhenAny(sendTask, receiveTask, monitorTask);
-
+                }
+                catch (OperationCanceledException)
+                {
+                    // FIX #4: Cancellation is intentional (Dispose was called) — exit cleanly
+                    CrestronConsole.PrintLine("Connection loop cancelled.");
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -91,9 +88,22 @@ namespace TcpClientLibrary
                 }
                 finally
                 {
-                    // If we are here, it means a disconnection occurred.
-                    await HandleDisconnectionAsync();
-                    await Task.Delay(_reconnectInterval, _cancellationTokenSource.Token);
+                    HandleDisconnection();
+
+                    // FIX #4: Check for cancellation before delaying to avoid
+                    // OperationCanceledException propagating unhandled out of the loop
+                    if (!_cancellationTokenSource.Token.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            await Task.Delay(_reconnectInterval, _cancellationTokenSource.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Cancelled during reconnect wait — exit cleanly
+                            CrestronConsole.PrintLine($"OperationCanceledException in ManageConnectionAsync");
+                        }
+                    }
                 }
             }
         }
@@ -116,7 +126,7 @@ namespace TcpClientLibrary
                     {
                         if (!(command.EndsWith("\r\n") || command.EndsWith("\n") || command.EndsWith("\r")))
                         {
-                            command += "\r\n"; // Standard terminator
+                            command += "\r\n";
                         }
 
                         byte[] data = Encoding.UTF8.GetBytes(command);
@@ -128,24 +138,33 @@ namespace TcpClientLibrary
                         await Task.Delay(_commandCheckDelay);
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
                 catch (IOException ioEx)
                 {
-                    CrestronConsole.PrintLine($"Error in Send loop (likely disconnect): {ioEx.Message}");
-                    break; // Exit loop to trigger reconnection
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                        CrestronConsole.PrintLine("Send loop stopped: Local disconnect.");
+                    else
+                        CrestronConsole.PrintLine($"Error in Send loop (likely remote disconnect): {ioEx.Message}");
+                    break;
                 }
                 catch (ObjectDisposedException)
                 {
                     CrestronConsole.PrintLine("Send loop stopped: Client has been disposed.");
-                    break; // Exit loop
+                    break;
                 }
                 catch (Exception e)
                 {
                     CrestronConsole.PrintLine($"Error in StartSendingCommands: {e.Message}");
-                    // Depending on the error, you might want to break here as well.
                 }
             }
         }
 
+        // FIX #6: Replaced DataAvailable polling with a continuous blocking ReadAsync.
+        // This eliminates up to 100ms response latency and is more reliable on slow networks
+        // where DataAvailable can return false even when data is in transit.
         private async Task StartReceivingResponsesAsync()
         {
             var buffer = new byte[65535];
@@ -153,32 +172,35 @@ namespace TcpClientLibrary
             {
                 try
                 {
-                    if (_stream.DataAvailable)
+                    int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length, _cancellationTokenSource.Token);
+                    if (bytesRead > 0)
                     {
-                        int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length, _cancellationTokenSource.Token);
-                        if (bytesRead > 0)
-                        {
-                            string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                            OnResponseReceived(response);
-                        }
-                        else
-                        {
-                            // A zero-byte read indicates a graceful shutdown by the remote host.
-                            CrestronConsole.PrintLine("Remote host closed the connection.");
-                            break; // Exit loop to trigger reconnection
-                        }
+                        string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                        OnResponseReceived(response);
                     }
-                    await Task.Delay(_responseCheckInterval);
+                    else
+                    {
+                        // Zero-byte read = graceful shutdown by remote host
+                        CrestronConsole.PrintLine("Remote host closed the connection.");
+                        break;
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 catch (IOException ioEx)
                 {
-                    CrestronConsole.PrintLine($"Error in Receive loop (likely disconnect): {ioEx.Message}");
-                    break; // Exit loop to trigger reconnection
+                    if (_cancellationTokenSource.Token.IsCancellationRequested)
+                        CrestronConsole.PrintLine("Receive loop stopped: Local disconnect.");
+                    else
+                        CrestronConsole.PrintLine($"Error in Receive loop (likely remote disconnect): {ioEx.Message}");
+                    break;
                 }
                 catch (ObjectDisposedException)
                 {
                     CrestronConsole.PrintLine("Receive loop stopped: Client has been disposed.");
-                    break; // Exit loop
+                    break;
                 }
                 catch (Exception e)
                 {
@@ -187,23 +209,22 @@ namespace TcpClientLibrary
             }
         }
 
-        /// <summary>
-        /// Monitors the socket to detect if it has been closed remotely without notice.
-        /// </summary>
         private async Task MonitorConnectionAsync()
         {
             while (IsConnected && !_cancellationTokenSource.Token.IsCancellationRequested)
             {
                 try
                 {
-                    // This is a common way to check for a dead socket. Sending 0 bytes
-                    // will throw an exception if the connection is closed.
                     if (_client.Client.Poll(1, SelectMode.SelectRead) && _client.Client.Available == 0)
                     {
                         CrestronConsole.PrintLine("Connection monitor detected a dead socket.");
-                        break; // Exit to trigger reconnection.
+                        break;
                     }
                     await Task.Delay(_connectionMonitorInterval);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
                 }
                 catch (Exception ex)
                 {
@@ -213,14 +234,19 @@ namespace TcpClientLibrary
             }
         }
 
-        /// <summary>
-        /// Handles the cleanup process upon disconnection.
-        /// </summary>
-        private Task HandleDisconnectionAsync()
+        // FIX #2: Now synchronous. Uses Interlocked.CompareExchange as an atomic
+        // "test-and-set" — only the first thread to flip _isConnected from 1→0 proceeds
+        // with cleanup. All subsequent callers return immediately, preventing double-disposal
+        // and multiple ConnectionStatusChanged(false) events.
+        // FIX #3: Removed the async Task wrapper and the .Wait() call in Disconnect() —
+        // the method never awaited anything meaningful, and .Wait() carried deadlock risk.
+        private void HandleDisconnection()
         {
-            if (!IsConnected) return Task.CompletedTask; // Already handled
+            // Atomically swap _isConnected from 1 to 0.
+            // If the return value is not 1, another thread already handled disconnection.
+            if (System.Threading.Interlocked.CompareExchange(ref _isConnected, 0, 1) != 1)
+                return;
 
-            IsConnected = false;
             OnConnectionStatusChanged(false);
 
             _stream?.Close();
@@ -230,7 +256,6 @@ namespace TcpClientLibrary
             _client = null;
 
             CrestronConsole.PrintLine("Connection lost. Will attempt to reconnect.");
-            return Task.CompletedTask;
         }
 
         protected virtual void OnResponseReceived(string response)
@@ -243,16 +268,11 @@ namespace TcpClientLibrary
             ConnectionStatusChanged?.Invoke(this, status);
         }
 
-        /// <summary>
-        /// Gracefully disconnects and stops all operations.
-        /// </summary>
+        // FIX #3: Disconnect() is now clean — no .Wait() needed since HandleDisconnection is synchronous
         public void Disconnect()
         {
-            if (_cancellationTokenSource != null)
-            {
-                _cancellationTokenSource.Cancel();
-            }
-            HandleDisconnectionAsync().Wait(); // Ensure cleanup is finished
+            _cancellationTokenSource?.Cancel();
+            HandleDisconnection();
         }
 
         public void Dispose()
